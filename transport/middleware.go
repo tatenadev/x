@@ -29,7 +29,7 @@ func closeBody(r *http.Request) {
 	}
 }
 
-func chain(inner RoundTrip, mw []Middleware) RoundTrip {
+func chain(inner RoundTrip, mw ...Middleware) RoundTrip {
 	for _, m := range slices.Backward(mw) {
 		next := inner // captured per iteration; rtf is reassigned below
 		inner = func(req *http.Request) (*http.Response, error) {

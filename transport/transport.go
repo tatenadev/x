@@ -27,7 +27,7 @@ func New(opts ...Option) *Transport {
 	for _, opt := range opts {
 		opt(t)
 	}
-	t.base = chain(t.base, t.mw)
+	t.base = chain(t.base, t.mw...)
 	return t
 }
 
