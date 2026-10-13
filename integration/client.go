@@ -17,6 +17,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/tatenadev/x/integration/auth"
 	"github.com/tatenadev/x/integration/codec"
 	"github.com/tatenadev/x/integration/resilience"
 	"github.com/tatenadev/x/integration/transport"
@@ -43,30 +44,56 @@ func New(service, baseURL string, opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("%w: base URL: %w", ErrInvalidConfig, unwrapURLError(err))
 	}
 
-	cfg := config{Config: defaultConfig(service, u)}
+	cfg, err := configure(defaultConfig(service, u), true, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &Client{json: codec.NewJSON(cfg.jsonOpts...), retry500: cfg.retry500}
+	c.cfg.Store(new(cfg.Config.clone()))
+	c.doer = &http.Client{
+		Transport:     buildChain(cfg),
+		Timeout:       cfg.Timeout,
+		CheckRedirect: c.checkRedirect,
+	}
+	return c, nil
+}
+
+// configure applies opts over defaults, fills in derived values, and
+// validates the result.
+func configure(defaults Config, requireBaseURL bool, opts []Option) (*config, error) {
+	cfg := &config{Config: defaults}
 	for _, opt := range opts {
-		if err := opt(&cfg); err != nil {
+		if err := opt(cfg); err != nil {
 			return nil, err
 		}
 	}
 	if !cfg.attemptTimeoutSet && cfg.Timeout > 0 {
 		cfg.AttemptTimeout = min(cfg.AttemptTimeout, cfg.Timeout)
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.validate(requireBaseURL); err != nil {
 		return nil, err
 	}
 	if cfg.base == nil {
 		cfg.base = newHTTPTransport()
 	}
+	return cfg, nil
+}
 
-	c := &Client{json: codec.NewJSON(cfg.jsonOpts...), retry500: cfg.retry500}
-	c.cfg.Store(new(cfg.Config.clone()))
-	c.doer = &http.Client{
-		Transport:     buildChain(&cfg),
-		Timeout:       cfg.Timeout,
-		CheckRedirect: c.checkRedirect,
+// NewHTTPClient returns an *http.Client running the same middleware chain
+// as [New] (request IDs, observability, retries, rate limiting, circuit
+// breaker, auth), for third-party SDKs that insist on an *http.Client and
+// call more than one host. Prefer [New] for everything else: this client
+// has no base URL, so it neither resolves paths, nor maps failures to
+// [*Error], nor confines requests or redirects to one origin. The auth
+// transport therefore sends credentials to every host the SDK (or a
+// redirect) points at; use it only with SDKs for APIs you trust that much.
+func NewHTTPClient(service string, opts ...Option) (*http.Client, error) {
+	cfg, err := configure(defaultConfig(service, nil), false, opts)
+	if err != nil {
+		return nil, err
 	}
-	return c, nil
+	return &http.Client{Transport: buildChain(cfg), Timeout: cfg.Timeout}, nil
 }
 
 // buildChain assembles the middleware stack, outermost first:
@@ -105,7 +132,7 @@ func buildChain(cfg *config) http.RoundTripper {
 		Policy:            policy,
 		MaxAttempts:       cfg.MaxAttempts,
 		AttemptTimeout:    cfg.AttemptTimeout,
-		RetryUnauthorized: cfg.tokens != nil,
+		RetryUnauthorized: canInvalidate(cfg.tokens),
 	}))
 	if cfg.RateLimit > 0 {
 		mws = append(mws, transport.RateLimit(resilience.NewTokenBucket(cfg.RateLimit, cfg.RateBurst)))
@@ -135,6 +162,13 @@ func buildChain(cfg *config) http.RoundTripper {
 // path is used with ID-like segments replaced by "{id}".
 func WithRoute(ctx context.Context, route string) context.Context {
 	return transport.WithRoute(ctx, route)
+}
+
+// canInvalidate reports whether a 401 can lead to a different token: only
+// then is retrying it worthwhile.
+func canInvalidate(ts auth.TokenSource) bool {
+	_, ok := ts.(auth.Invalidator)
+	return ok
 }
 
 // Idempotent returns a copy of ctx that opts a POST or PATCH made with it

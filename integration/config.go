@@ -65,7 +65,10 @@ func (c Config) clone() Config {
 
 // Validate reports every problem with c at once. The returned error wraps
 // [ErrInvalidConfig].
-func (c Config) Validate() error {
+func (c Config) Validate() error { return c.validate(true) }
+
+// validate is Validate, with the base URL optional for [NewHTTPClient].
+func (c Config) validate(requireBaseURL bool) error {
 	var errs []error
 	add := func(format string, args ...any) {
 		errs = append(errs, fmt.Errorf(format, args...))
@@ -74,8 +77,10 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Service) == "" {
 		add("service is empty")
 	}
-	if err := validateBaseURL(c.BaseURL); err != nil {
-		errs = append(errs, err)
+	if c.BaseURL != nil || requireBaseURL {
+		if err := validateBaseURL(c.BaseURL); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if c.Timeout <= 0 {
 		add("timeout %v is not positive", c.Timeout)

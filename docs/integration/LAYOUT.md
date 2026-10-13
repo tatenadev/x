@@ -233,6 +233,11 @@ type Client struct {
 
 func New(service, baseURL string, opts ...Option) (*Client, error)
 
+// NewHTTPClient runs the same chain as New but with no base URL, for SDKs that
+// need an *http.Client and call several hosts. It has no origin guard and no
+// *Error mapping. See MIGRATING.md.
+func NewHTTPClient(service string, opts ...Option) (*http.Client, error)
+
 // Idempotent opts one POST/PATCH call into an Idempotency-Key (and retries).
 func Idempotent(ctx context.Context) context.Context
 
