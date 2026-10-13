@@ -73,8 +73,8 @@ func New(service, baseURL string, opts ...Option) (*Client, error) {
 //	Tracing -> RequestID -> Metrics -> Logging -> caller middleware
 //	  -> Retry -> RateLimit -> CircuitBreaker -> Auth -> base
 //
-// Tracing, Metrics, Logging, RateLimit and CircuitBreaker arrive in later
-// phases at the positions above.
+// Tracing, Metrics and Logging arrive in a later phase at the positions
+// above. RateLimit is present only when a rate is configured.
 func buildChain(cfg *config) http.RoundTripper {
 	var ridOpts []transport.RequestIDOption
 	if cfg.idemAll {
@@ -96,6 +96,10 @@ func buildChain(cfg *config) http.RoundTripper {
 		AttemptTimeout:    cfg.AttemptTimeout,
 		RetryUnauthorized: cfg.tokens != nil,
 	}))
+	if cfg.RateLimit > 0 {
+		mws = append(mws, transport.RateLimit(resilience.NewTokenBucket(cfg.RateLimit, cfg.RateBurst)))
+	}
+	mws = append(mws, transport.CircuitBreaker(resilience.NewConsecutiveBreaker(cfg.BreakerFailures, cfg.BreakerCooldown)))
 	if cfg.tokens != nil {
 		mws = append(mws, transport.Auth(cfg.tokens))
 	}

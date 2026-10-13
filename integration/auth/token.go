@@ -11,6 +11,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -59,6 +60,11 @@ func (t Token) LogValue() slog.Value {
 	}
 	return slog.GroupValue(attrs...)
 }
+
+// ErrTokenUnavailable wraps every error the auth transport gets from a
+// [TokenSource]. It marks the failure as ours, not the upstream's, so it
+// does not count against the upstream's circuit breaker.
+var ErrTokenUnavailable = errors.New("auth: token unavailable")
 
 // TokenSource supplies the token for a request. Implementations must be
 // safe for concurrent use.

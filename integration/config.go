@@ -105,6 +105,12 @@ func (c Config) Validate() error {
 	if c.RateBurst < 0 || (c.RateLimit > 0 && c.RateBurst < 1) {
 		add("rate burst %d is less than 1", c.RateBurst)
 	}
+	// The limiter waits inside the attempt, so a slot must come round
+	// well within one attempt timeout.
+	if c.RateLimit > 0 && c.AttemptTimeout > 0 && time.Duration(float64(time.Second)/c.RateLimit) >= c.AttemptTimeout {
+		add("rate limit %v/s spaces calls %v apart, not below attempt timeout %v",
+			c.RateLimit, time.Duration(float64(time.Second)/c.RateLimit), c.AttemptTimeout)
+	}
 
 	if len(errs) == 0 {
 		return nil

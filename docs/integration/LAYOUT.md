@@ -204,6 +204,8 @@ func WithRetry(maxAttempts int, base, max time.Duration) Option
 func WithRetryPolicy(p transport.RetryPolicy) Option
 func WithRetryServerErrors() Option                   // also retry a plain 500
 func WithIdempotencyKeys() Option                     // Idempotency-Key on every POST/PATCH
+func WithRateLimit(rps float64, burst int) Option     // 1/rps must stay below AttemptTimeout
+func WithBreaker(failures int, cooldown time.Duration) Option
 func WithRand(r *rand.Rand) Option // math/rand/v2; deterministic jitter in tests
 func WithTokenSource(ts auth.TokenSource) Option
 func WithLogger(l *slog.Logger) Option

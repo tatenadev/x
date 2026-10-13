@@ -43,7 +43,7 @@ func Auth(src auth.TokenSource, opts ...AuthOption) Middleware {
 			tok, err := src.Token(req.Context())
 			if err != nil {
 				closeRequestBody(req)
-				return nil, fmt.Errorf("auth: %w", err)
+				return nil, fmt.Errorf("%w: %w", auth.ErrTokenUnavailable, err)
 			}
 			name, value := tok.Header()
 			if !o.overwrite && req.Header.Get(name) != "" {

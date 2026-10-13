@@ -122,6 +122,27 @@ func WithIdempotencyKeys() Option {
 	}
 }
 
+// WithRateLimit paces attempts to rps per second with bursts of up to
+// burst. Every attempt, retries included, takes a token. The wait counts
+// against the attempt timeout, so 1/rps must stay below it. The default is
+// unlimited.
+func WithRateLimit(rps float64, burst int) Option {
+	return func(c *config) error {
+		c.RateLimit, c.RateBurst = rps, burst
+		return nil
+	}
+}
+
+// WithBreaker opens the circuit after failures consecutive upstream
+// failures and keeps it open for cooldown before probing again (defaults
+// 5 and 30s).
+func WithBreaker(failures int, cooldown time.Duration) Option {
+	return func(c *config) error {
+		c.BreakerFailures, c.BreakerCooldown = failures, cooldown
+		return nil
+	}
+}
+
 // WithBaseTransport replaces the innermost transport, which by default is
 // a fresh *http.Transport. Use it for tests or custom TLS.
 func WithBaseTransport(rt http.RoundTripper) Option {
