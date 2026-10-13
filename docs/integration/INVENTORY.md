@@ -24,8 +24,8 @@ A wider search (`DefaultTransport`, `oauth2.Transport`, `RoundTrip`, `option.Wit
 
 - **File / func:** `google/client.go` `Client(ctx, xdg, scope...) (*http.Client, error)`
 - **Builds:** `transport.New(WithBaseTransport(oauth2.Transport{Source: ts}.RoundTrip),
-  WithMiddleware(transport.Retry(...)))` and then calls `.Client()`. **That method no longer
-  exists** (removed in `4d1748d`), so `google` does not compile at HEAD.
+  WithMiddleware(transport.Retry(...)))` wrapped in `&http.Client{Transport: ...}`. Until
+  `0046cb7` it called `.Client()`, which `4d1748d` removed.
 - **Auth:** `oauth2.Transport` with the token source from `google.TokenSource` (JWT service
   account, then a persisted OAuth2 user token with a browser flow, then ADC). `oauth2.Transport.Base`
   is nil, so it falls through to **`http.DefaultTransport`**. The auth step sits inside Retry, so
@@ -152,7 +152,8 @@ duplicate keys. No HTTP client in the repo decodes into Go slices or maps from a
 
 ## Baseline state at HEAD (pre-existing failures)
 
-Phase 0 made no code changes, so these failures were already there:
+**Resolved** in `0046cb7` (baseline fix) and `99cadb1` (`go fix`), before Phase 1. The table
+records the state Phase 0 found:
 
 | Command               | Result                                                                                                      |
 |-----------------------|-------------------------------------------------------------------------------------------------------------|

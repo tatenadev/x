@@ -30,10 +30,11 @@ Fill these in during Phase 0. Do not guess.
 
 - Module path: `github.com/tatenadev/x`
 - `go` directive in `go.mod`: `go 1.27` (toolchain `go1.27.0`; no upgrade needed)
-- Package root for this layer: `TODO`. **Decision pending.** The default is
-  `internal/integration`, but this repo is a library of public top-level packages and already has
-  `transport/` and `policy/`, which overlap with the planned layer. See
-  `docs/integration/INVENTORY.md`, "Existing transport / policy packages".
+- Package root for this layer: `integration/` (public, `github.com/tatenadev/x/integration`).
+  It is built fresh. The existing top-level `transport/` and `policy/` packages stay as they
+  are and are retired later, after their callers migrate. Do not import them from `integration/`.
+  `integration/transport` shares a name with the old top-level `transport`, so alias one of them
+  in any file that needs both.
 - Existing HTTP clients found: `google/client.go` (`Client`, oauth2 + `transport.Retry`),
   `browser/browser.go` (`Session`, injected `Doer`), `file/download.go` (`Download`, bare
   `http.Get`). Shared resilience code: `transport/`, `policy/`. Implicit `http.DefaultClient`
