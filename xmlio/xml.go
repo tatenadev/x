@@ -101,11 +101,11 @@ func WriteElements(element string, r io.Reader, w io.Writer) (err error) {
 	for t := range Tokens(xml.NewDecoder(r), false) {
 		switch el := t.(type) {
 		case xml.ProcInst:
-			_, err = fPrintF(enabled, w, "<?%s %s?>", el.Target, el.Inst)
+			_, err = fPrintF(enabled, w, fmt.Sprintf("<?%s %s?>", el.Target, el.Inst))
 		case xml.Directive:
-			_, err = fPrintF(enabled, w, "<!%s>", el)
+			_, err = fPrintF(enabled, w, fmt.Sprintf("<!%s>", el))
 		case xml.Comment:
-			_, err = fPrintF(enabled, w, "<!--%s-->", el)
+			_, err = fPrintF(enabled, w, fmt.Sprintf("<!--%s-->", el))
 		case xml.CharData:
 			err = escapeText(enabled, w, bytes.TrimSpace(reSpaces.ReplaceAll(el, []byte(" "))))
 		case xml.StartElement:
@@ -178,7 +178,6 @@ func NormalizeSpaces(input string) string {
 }
 
 func Tokens(dec *xml.Decoder, raw bool) iter.Seq[xml.Token] {
-	eof := new(io.EOF)
 	token := dec.Token
 	if raw {
 		token = dec.RawToken
@@ -188,15 +187,16 @@ func Tokens(dec *xml.Decoder, raw bool) iter.Seq[xml.Token] {
 		for {
 			t, err := token()
 			if err != nil {
-				if errors.As(err, eof) { // err=EOF
-					if len(cd) != 0 { // there is leftover data
-						// yield (no use to check for return value)
-						yield(cd)
-					}
-					return
+				// Stop on any error, not just EOF: the decoder keeps
+				// returning the same syntax error, so continuing would spin.
+				if !errors.Is(err, io.EOF) {
+					slog.Error("errored", "err", err)
 				}
-				slog.Error("errored", "err", err)
-				continue
+				if len(cd) != 0 { // there is leftover data
+					// yield (no use to check for return value)
+					yield(cd)
+				}
+				return
 			}
 
 			if c, ok := t.(xml.CharData); ok {

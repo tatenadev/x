@@ -44,10 +44,10 @@ func Client(ctx context.Context, xdg paths.XDG, scope ...string) (*http.Client, 
 		return nil, err
 	}
 
-	return transport.New(
+	return &http.Client{Transport: transport.New(
 		transport.WithBaseTransport((&oauth2.Transport{Source: ts}).RoundTrip),
 		transport.WithMiddleware(
 			transport.Retry(transport.Retrier{Backoff: policy.DefaultBackoff}),
 		),
-	).Client(), nil
+	)}, nil
 }

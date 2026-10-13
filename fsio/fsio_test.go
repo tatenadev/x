@@ -64,15 +64,9 @@ func TestGlob(t *testing.T) {
 func TestGlob_InvalidPattern(t *testing.T) {
 	fs := fstest.MapFS{}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("Glob() expected panic for invalid pattern")
-		}
-	}()
-
-	// Invalid pattern should cause panic
-	for range fsio.Glob(fs, "[") {
-		// This should not be reached
+	// Glob logs a bad pattern and yields nothing; it does not panic.
+	for got := range fsio.Glob(fs, "[") {
+		t.Errorf("Glob() yielded %q for invalid pattern", got)
 	}
 }
 

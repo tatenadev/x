@@ -26,7 +26,7 @@ const defaultDateFormat = "2006-01-02"
 
 // defaultDelimiter is the field delimiter Config falls back to when no
 // WithDelimiter option is given.
-const defaultDelimiter = '.'
+const defaultDelimiter = ','
 
 // errPrefix identifies errors originating from this package.
 const errPrefix = "banking"
