@@ -196,6 +196,7 @@ func (c Config) Validate() error
 type Option func(*config) error
 
 func WithTimeout(d time.Duration) Option
+func WithAttemptTimeout(d time.Duration) Option // default 10s, lowered to Timeout if shorter
 func WithRetry(maxAttempts int, base, max time.Duration) Option
 func WithRetryPolicy(p transport.RetryPolicy) Option
 func WithRand(r *rand.Rand) Option // math/rand/v2; deterministic jitter in tests
@@ -290,7 +291,7 @@ func (b *BillingClient) Invoices(ctx context.Context) iter.Seq2[Invoice, error] 
 func TestRetryBackoff(t *testing.T) {
     synctest.Test(t, func(t *testing.T) {
         var calls atomic.Int32
-        srv := httptest.NewTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             if calls.Add(1) < 3 {
                 w.WriteHeader(http.StatusServiceUnavailable)
                 return
@@ -319,5 +320,5 @@ func TestRetryBackoff(t *testing.T) {
 }
 ```
 
-Verify `httptest.NewTestServer`'s exact signature with `go doc net/http/httptest.NewTestServer`
-before copying this.
+`httptest.NewTestServer(t testing.TB, handler http.Handler)` was verified against go1.27.0
+with `go doc net/http/httptest.NewTestServer`.
