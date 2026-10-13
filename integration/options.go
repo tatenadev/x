@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tatenadev/x/integration/auth"
 	"github.com/tatenadev/x/integration/transport"
 )
 
@@ -19,6 +20,7 @@ type config struct {
 	base       http.RoundTripper
 	middleware []transport.Middleware
 	jsonOpts   []json.Options
+	tokens     auth.TokenSource
 
 	// attemptTimeoutSet records an explicit WithAttemptTimeout. Without
 	// one, New lowers the default attempt timeout to fit Timeout.
@@ -54,6 +56,19 @@ func WithRetry(maxAttempts int, base, max time.Duration) Option {
 		c.MaxAttempts = maxAttempts
 		c.BackoffBase = base
 		c.BackoffMax = max
+		return nil
+	}
+}
+
+// WithTokenSource authenticates every attempt with credentials from ts.
+// The auth transport is the innermost middleware, so each retry fetches
+// the token again and can pick up a refresh.
+func WithTokenSource(ts auth.TokenSource) Option {
+	return func(c *config) error {
+		if ts == nil {
+			return fmt.Errorf("%w: token source is nil", ErrInvalidConfig)
+		}
+		c.tokens = ts
 		return nil
 	}
 }

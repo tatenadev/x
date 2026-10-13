@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -73,10 +74,14 @@ func New(service, baseURL string, opts ...Option) (*Client, error) {
 //	Tracing -> RequestID -> Metrics -> Logging -> caller middleware
 //	  -> Retry -> RateLimit -> CircuitBreaker -> Auth -> base
 //
-// Only caller middleware exists so far; the rest arrive in later phases at
-// the positions above.
+// Tracing, RequestID, Metrics, Logging, Retry, RateLimit and
+// CircuitBreaker arrive in later phases at the positions above.
 func buildChain(cfg *config) http.RoundTripper {
-	return transport.Chain(cfg.base, cfg.middleware...)
+	mws := slices.Clone(cfg.middleware)
+	if cfg.tokens != nil {
+		mws = append(mws, transport.Auth(cfg.tokens))
+	}
+	return transport.Chain(cfg.base, mws...)
 }
 
 // newHTTPTransport returns a transport owned by one Client, never shared
