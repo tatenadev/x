@@ -89,6 +89,15 @@ type Tracer interface {
     Start(ctx context.Context, req *http.Request) (context.Context, func(resp *http.Response, err error))
     Inject(ctx context.Context, h http.Header)
 }
+
+// Optional: a Tracer that also implements this records each attempt (span event).
+type AttemptTracer interface {
+    TraceAttempt(ctx context.Context, a AttemptInfo)
+}
+
+// Retry reports every attempt to hooks registered on the request context;
+// Tracing, Metrics and Logging use this to count attempts and emit events.
+func ObserveAttempts(ctx context.Context, fn func(AttemptInfo)) context.Context
 ```
 
 ```go
@@ -208,7 +217,7 @@ func WithRateLimit(rps float64, burst int) Option     // 1/rps must stay below A
 func WithBreaker(failures int, cooldown time.Duration) Option
 func WithRand(r *rand.Rand) Option // math/rand/v2; deterministic jitter in tests
 func WithTokenSource(ts auth.TokenSource) Option
-func WithLogger(l *slog.Logger) Option
+func WithLogger(l *slog.Logger, opts ...transport.LoggingOption) Option // LogHeaders, LogBodies; no logger = no logging
 func WithMetrics(m transport.MetricsRecorder) Option
 func WithTracer(t transport.Tracer) Option
 func WithBaseTransport(rt http.RoundTripper) Option // tests / custom TLS
@@ -226,6 +235,10 @@ func New(service, baseURL string, opts ...Option) (*Client, error)
 
 // Idempotent opts one POST/PATCH call into an Idempotency-Key (and retries).
 func Idempotent(ctx context.Context) context.Context
+
+// WithRoute names the route template ("/invoices/{id}") for logs and metrics.
+// Without it, ID-like path segments are replaced by "{id}".
+func WithRoute(ctx context.Context, route string) context.Context
 ```
 
 `New` must: parse and validate `baseURL`, apply options, validate the final config, build a fresh

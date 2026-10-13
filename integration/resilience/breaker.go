@@ -46,6 +46,7 @@ func (s State) String() string {
 type ConsecutiveBreaker struct {
 	threshold int
 	cooldown  time.Duration
+	onChange  func(from, to State)
 
 	mu           sync.Mutex
 	state        State
@@ -55,16 +56,46 @@ type ConsecutiveBreaker struct {
 	probeStarted time.Time
 }
 
+// BreakerOption configures [NewConsecutiveBreaker].
+type BreakerOption func(*ConsecutiveBreaker)
+
+// OnStateChange calls fn after every state transition, outside the
+// breaker's lock. fn must not block.
+func OnStateChange(fn func(from, to State)) BreakerOption {
+	return func(b *ConsecutiveBreaker) { b.onChange = fn }
+}
+
 // NewConsecutiveBreaker returns a closed breaker that opens after
 // threshold consecutive failures (minimum 1) and stays open for cooldown.
-func NewConsecutiveBreaker(threshold int, cooldown time.Duration) *ConsecutiveBreaker {
-	return &ConsecutiveBreaker{threshold: max(threshold, 1), cooldown: cooldown}
+func NewConsecutiveBreaker(threshold int, cooldown time.Duration, opts ...BreakerOption) *ConsecutiveBreaker {
+	b := &ConsecutiveBreaker{threshold: max(threshold, 1), cooldown: cooldown}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
+}
+
+// transition runs fn under the lock and reports any state change to the
+// OnStateChange callback after releasing it.
+func (b *ConsecutiveBreaker) transition(fn func() error) error {
+	b.mu.Lock()
+	from := b.state
+	err := fn()
+	to := b.state
+	b.mu.Unlock()
+	if from != to && b.onChange != nil {
+		b.onChange(from, to)
+	}
+	return err
 }
 
 // Allow implements [Breaker].
 func (b *ConsecutiveBreaker) Allow() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	return b.transition(b.allow)
+}
+
+// allow is Allow with b.mu held.
+func (b *ConsecutiveBreaker) allow() error {
 	now := time.Now()
 	switch b.state {
 	case Open:
@@ -86,8 +117,14 @@ func (b *ConsecutiveBreaker) Allow() error {
 // Record implements [Breaker]. A result arriving while open belongs to a
 // call let through before the breaker opened and is ignored.
 func (b *ConsecutiveBreaker) Record(success bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.transition(func() error {
+		b.record(success)
+		return nil
+	})
+}
+
+// record is Record with b.mu held.
+func (b *ConsecutiveBreaker) record(success bool) {
 	switch b.state {
 	case Closed:
 		if success {

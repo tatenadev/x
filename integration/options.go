@@ -6,6 +6,7 @@ package integration
 import (
 	"encoding/json/v2"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"time"
@@ -26,6 +27,10 @@ type config struct {
 	policy     transport.RetryPolicy
 	retry500   bool
 	idemAll    bool
+	logger     *slog.Logger
+	logOpts    []transport.LoggingOption
+	metrics    transport.MetricsRecorder
+	tracer     transport.Tracer
 
 	// attemptTimeoutSet records an explicit WithAttemptTimeout. Without
 	// one, New lowers the default attempt timeout to fit Timeout.
@@ -139,6 +144,42 @@ func WithRateLimit(rps float64, burst int) Option {
 func WithBreaker(failures int, cooldown time.Duration) Option {
 	return func(c *config) error {
 		c.BreakerFailures, c.BreakerCooldown = failures, cooldown
+		return nil
+	}
+}
+
+// WithLogger logs one line per call (Info, or Warn on a transport error or
+// 5xx) plus a Debug line per attempt, and circuit breaker transitions.
+// URLs are redacted; LogHeaders and LogBodies add redacted headers and
+// bodies. Without it the client does not log.
+func WithLogger(l *slog.Logger, opts ...transport.LoggingOption) Option {
+	return func(c *config) error {
+		if l == nil {
+			return fmt.Errorf("%w: logger is nil", ErrInvalidConfig)
+		}
+		c.logger, c.logOpts = l, opts
+		return nil
+	}
+}
+
+// WithMetrics reports every call to m, with a templated route.
+func WithMetrics(m transport.MetricsRecorder) Option {
+	return func(c *config) error {
+		if m == nil {
+			return fmt.Errorf("%w: metrics recorder is nil", ErrInvalidConfig)
+		}
+		c.metrics = m
+		return nil
+	}
+}
+
+// WithTracer wraps every call in a span from t and propagates it.
+func WithTracer(t transport.Tracer) Option {
+	return func(c *config) error {
+		if t == nil {
+			return fmt.Errorf("%w: tracer is nil", ErrInvalidConfig)
+		}
+		c.tracer = t
 		return nil
 	}
 }

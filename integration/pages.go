@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/tatenadev/x/integration/transport"
 )
 
 // PageFunc reports the URL of the next page, or "" when the current page
@@ -97,7 +99,7 @@ func nextPageRequest(ctx context.Context, req *http.Request, resp *http.Response
 	u := cur.ResolveReference(ref)
 	u.Fragment, u.RawFragment = "", ""
 	if u.String() == cur.String() {
-		return nil, fmt.Errorf("next page URL %s repeats the current page", redactURL(u))
+		return nil, fmt.Errorf("next page URL %s repeats the current page", transport.RedactURL(u))
 	}
 	nreq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {

@@ -129,11 +129,18 @@ func (c RetryConfig) roundTrip(next http.RoundTripper, req *http.Request) (*http
 		if err != nil {
 			return nil, err
 		}
+		started := time.Now()
 		resp, err := next.RoundTrip(areq)
+		report := func(retry bool, delay time.Duration) {
+			notifyAttempt(ctx, AttemptInfo{Attempt: attempt, StatusCode: statusOf(resp), Err: err,
+				Duration: time.Since(started), Retry: retry, Delay: delay})
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				cancel()
-				return nil, fmt.Errorf("retry: attempt %d: %w", attempt, context.Cause(ctx))
+				err = fmt.Errorf("retry: attempt %d: %w", attempt, context.Cause(ctx))
+				report(false, 0)
+				return nil, err
 			}
 			if errors.Is(context.Cause(areq.Context()), resilience.ErrAttemptTimeout) {
 				err = fmt.Errorf("%w after %v: %w", resilience.ErrAttemptTimeout, c.AttemptTimeout, err)
@@ -155,6 +162,7 @@ func (c RetryConfig) roundTrip(next http.RoundTripper, req *http.Request) (*http
 			}
 		}
 
+		report(retry, delay)
 		if !retry {
 			if err != nil {
 				cancel()

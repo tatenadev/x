@@ -70,33 +70,3 @@ func TestNew_AttemptTimeout(t *testing.T) {
 		})
 	}
 }
-
-func TestRedactURL(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"https://api.test/x", "https://api.test/x"},
-		{"https://u:p@api.test/x", "https://REDACTED@api.test/x"},
-		{"https://api.test/x?token=a&b=1", "https://api.test/x?b=1&token=REDACTED"},
-		{"https://api.test/x?client_secret=a&Signature=b&key=c&code=d", "https://api.test/x?Signature=REDACTED&client_secret=REDACTED&code=REDACTED&key=REDACTED"},
-		{"https://api.test/x?page=2&sort=asc", "https://api.test/x?page=2&sort=asc"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			u, err := url.Parse(tt.in)
-			if err != nil {
-				t.Fatal(err)
-			}
-			before := u.String()
-			if got := redactURL(u); got != tt.want {
-				t.Errorf("redactURL() = %s, want %s", got, tt.want)
-			}
-			if u.String() != before {
-				t.Errorf("redactURL mutated its input: %s", u)
-			}
-		})
-	}
-	if got := redactURL(nil); got != "" {
-		t.Errorf("redactURL(nil) = %q", got)
-	}
-}

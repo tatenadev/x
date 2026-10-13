@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
@@ -73,8 +74,8 @@ func New(service, baseURL string, opts ...Option) (*Client, error) {
 //	Tracing -> RequestID -> Metrics -> Logging -> caller middleware
 //	  -> Retry -> RateLimit -> CircuitBreaker -> Auth -> base
 //
-// Tracing, Metrics and Logging arrive in a later phase at the positions
-// above. RateLimit is present only when a rate is configured.
+// Tracing, Metrics and Logging are present when a tracer, recorder or
+// logger is configured; RateLimit when a rate is.
 func buildChain(cfg *config) http.RoundTripper {
 	var ridOpts []transport.RequestIDOption
 	if cfg.idemAll {
@@ -88,7 +89,17 @@ func buildChain(cfg *config) http.RoundTripper {
 		}
 	}
 
-	mws := []transport.Middleware{transport.RequestID(ridOpts...)}
+	var mws []transport.Middleware
+	if cfg.tracer != nil {
+		mws = append(mws, transport.Tracing(cfg.tracer))
+	}
+	mws = append(mws, transport.RequestID(ridOpts...))
+	if cfg.metrics != nil {
+		mws = append(mws, transport.Metrics(cfg.metrics, cfg.Service))
+	}
+	if cfg.logger != nil {
+		mws = append(mws, transport.Logging(cfg.logger, cfg.Service, cfg.logOpts...))
+	}
 	mws = append(mws, cfg.middleware...)
 	mws = append(mws, transport.Retry(transport.RetryConfig{
 		Policy:            policy,
@@ -99,11 +110,31 @@ func buildChain(cfg *config) http.RoundTripper {
 	if cfg.RateLimit > 0 {
 		mws = append(mws, transport.RateLimit(resilience.NewTokenBucket(cfg.RateLimit, cfg.RateBurst)))
 	}
-	mws = append(mws, transport.CircuitBreaker(resilience.NewConsecutiveBreaker(cfg.BreakerFailures, cfg.BreakerCooldown)))
+	var breakerOpts []resilience.BreakerOption
+	if cfg.logger != nil {
+		logger, service := cfg.logger, cfg.Service
+		breakerOpts = append(breakerOpts, resilience.OnStateChange(func(from, to resilience.State) {
+			level := slog.LevelInfo
+			if to == resilience.Open {
+				level = slog.LevelWarn
+			}
+			logger.LogAttrs(context.Background(), level, "integration circuit breaker",
+				slog.String("service", service), slog.String("from", from.String()), slog.String("to", to.String()))
+		}))
+	}
+	breaker := resilience.NewConsecutiveBreaker(cfg.BreakerFailures, cfg.BreakerCooldown, breakerOpts...)
+	mws = append(mws, transport.CircuitBreaker(breaker))
 	if cfg.tokens != nil {
 		mws = append(mws, transport.Auth(cfg.tokens))
 	}
 	return transport.Chain(cfg.base, mws...)
+}
+
+// WithRoute returns a copy of ctx naming the route template of calls made
+// with it, such as "/invoices/{id}", for logs and metrics. Without it the
+// path is used with ID-like segments replaced by "{id}".
+func WithRoute(ctx context.Context, route string) context.Context {
+	return transport.WithRoute(ctx, route)
 }
 
 // Idempotent returns a copy of ctx that opts a POST or PATCH made with it
@@ -156,7 +187,7 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 			req.Body.Close()
 		}
 		return nil, fmt.Errorf("integration: %s: request to %s is outside base URL %s",
-			cfg.Service, redactURL(req.URL), redactURL(cfg.BaseURL))
+			cfg.Service, transport.RedactURL(req.URL), transport.RedactURL(cfg.BaseURL))
 	}
 
 	// Fix the request ID here, on the context, so errors can report it even
@@ -217,7 +248,7 @@ func resolve(base *url.URL, path string) (*url.URL, error) {
 		return nil, fmt.Errorf("integration: path: %w", unwrapURLError(err))
 	}
 	if ref.Scheme != "" || ref.Host != "" || ref.User != nil || ref.Opaque != "" {
-		return nil, fmt.Errorf("integration: path %q is not relative", redactURL(ref))
+		return nil, fmt.Errorf("integration: path %q is not relative", transport.RedactURL(ref))
 	}
 	for seg := range strings.SplitSeq(ref.Path, "/") {
 		if seg == "." || seg == ".." {
@@ -268,7 +299,7 @@ func transportError(ctx context.Context, cfg *Config, req *http.Request, request
 	return &Error{
 		Service:   cfg.Service,
 		Method:    req.Method,
-		URL:       redactURL(req.URL),
+		URL:       transport.RedactURL(req.URL),
 		Retryable: retryable,
 		RequestID: requestID,
 		Err:       err,
@@ -311,7 +342,7 @@ func responseError(cfg *Config, req *http.Request, resp *http.Response) *Error {
 	return &Error{
 		Service:    cfg.Service,
 		Method:     req.Method,
-		URL:        redactURL(sent.URL),
+		URL:        transport.RedactURL(sent.URL),
 		StatusCode: resp.StatusCode,
 		RequestID:  id,
 	}
@@ -322,44 +353,6 @@ func unwrapURLError(err error) error {
 		return ue.Err
 	}
 	return err
-}
-
-// redactURL renders u for errors and logs: userinfo is replaced and query
-// values whose names look secret are masked. u itself is not modified.
-func redactURL(u *url.URL) string {
-	if u == nil {
-		return ""
-	}
-	r := u.Clone()
-	if r.User != nil {
-		r.User = url.User("REDACTED")
-	}
-	if r.RawQuery != "" {
-		q := r.Query()
-		for k := range q {
-			if sensitiveParam(k) {
-				q[k] = []string{"REDACTED"}
-			}
-		}
-		r.RawQuery = q.Encode()
-	}
-	return r.String()
-}
-
-// sensitiveParam reports whether a query parameter name likely carries a
-// credential. It errs toward redacting.
-func sensitiveParam(name string) bool {
-	n := strings.ToLower(name)
-	switch n {
-	case "key", "sig", "code", "auth":
-		return true
-	}
-	for _, s := range []string{"token", "secret", "password", "passwd", "signature", "apikey", "api_key", "api-key", "credential", "session"} {
-		if strings.Contains(n, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // Compile-time check that the stdlib client satisfies Doer.
