@@ -4,6 +4,7 @@
 package integration
 
 import (
+	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"time"
@@ -17,6 +18,7 @@ type config struct {
 	Config
 	base       http.RoundTripper
 	middleware []transport.Middleware
+	jsonOpts   []json.Options
 
 	// attemptTimeoutSet records an explicit WithAttemptTimeout. Without
 	// one, New lowers the default attempt timeout to fit Timeout.
@@ -78,6 +80,22 @@ func WithMiddleware(mws ...transport.Middleware) Option {
 			}
 		}
 		c.middleware = append(c.middleware, mws...)
+		return nil
+	}
+}
+
+// WithJSONOptions applies opts to every JSON encode and decode of this
+// client, on top of the strict v2 defaults. Use it only for a specific
+// upstream that needs leniency, and say why at the call site, e.g.
+// jsontext.AllowDuplicateNames(true) for an API that repeats keys.
+func WithJSONOptions(opts ...json.Options) Option {
+	return func(c *config) error {
+		for i, o := range opts {
+			if o == nil {
+				return fmt.Errorf("%w: JSON option %d is nil", ErrInvalidConfig, i)
+			}
+		}
+		c.jsonOpts = append(c.jsonOpts, opts...)
 		return nil
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tatenadev/x/integration/codec"
 	"github.com/tatenadev/x/integration/transport"
 )
 
@@ -28,6 +29,7 @@ const maxRedirects = 10
 type Client struct {
 	cfg  atomic.Pointer[Config]
 	doer Doer
+	json codec.JSON
 }
 
 // New builds a Client for service at baseURL. It applies defaults, then
@@ -56,7 +58,7 @@ func New(service, baseURL string, opts ...Option) (*Client, error) {
 		cfg.base = newHTTPTransport()
 	}
 
-	c := &Client{}
+	c := &Client{json: codec.NewJSON(cfg.jsonOpts...)}
 	c.cfg.Store(new(cfg.Config.clone()))
 	c.doer = &http.Client{
 		Transport:     buildChain(&cfg),
@@ -236,6 +238,23 @@ func statusError(cfg *Config, req *http.Request, resp *http.Response) *Error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody)) // diagnostics only
 	resp.Body.Close()
 
+	e := responseError(cfg, req, resp)
+	e.Retryable = retryableStatus(resp.StatusCode)
+	e.Body = body
+	return e
+}
+
+// decodeError reports a 2xx response whose body could not be decoded. It
+// is not retryable: the upstream answered, just not in the agreed shape.
+func decodeError(cfg *Config, req *http.Request, resp *http.Response, err error) *Error {
+	e := responseError(cfg, req, resp)
+	e.Err = fmt.Errorf("decode response: %w", err)
+	return e
+}
+
+// responseError fills the fields common to errors about a received
+// response.
+func responseError(cfg *Config, req *http.Request, resp *http.Response) *Error {
 	// The request that reached the wire is a middleware clone; prefer its
 	// headers, since that is where a generated request ID lives.
 	sent := req
@@ -247,9 +266,7 @@ func statusError(cfg *Config, req *http.Request, resp *http.Response) *Error {
 		Method:     req.Method,
 		URL:        redactURL(sent.URL),
 		StatusCode: resp.StatusCode,
-		Retryable:  retryableStatus(resp.StatusCode),
 		RequestID:  sent.Header.Get(headerRequestID),
-		Body:       body,
 	}
 }
 
