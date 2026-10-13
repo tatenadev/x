@@ -64,7 +64,7 @@ func toValueRange(data any) (*sheets.ValueRange, error) {
 
 	// Extract headers from the first struct's field names
 	firstElem := val.Index(0)
-	if firstElem.Kind() == reflect.Ptr {
+	if firstElem.Kind() == reflect.Pointer {
 		firstElem = firstElem.Elem()
 	}
 
@@ -85,14 +85,14 @@ func toValueRange(data any) (*sheets.ValueRange, error) {
 	// Extract values for each row
 	for i := 0; i < val.Len(); i++ {
 		elem := val.Index(i)
-		if elem.Kind() == reflect.Ptr {
+		if elem.Kind() == reflect.Pointer {
 			elem = elem.Elem()
 		}
 
 		if elem.Kind() == reflect.Struct {
 			var row []any
-			for j := 0; j < elem.NumField(); j++ {
-				row = append(row, elem.Field(j).Interface())
+			for _, field := range elem.Fields() {
+				row = append(row, field.Interface())
 			}
 			rows = append(rows, row)
 		} else if elem.Kind() == reflect.Slice || elem.Kind() == reflect.Array {
