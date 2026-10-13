@@ -101,7 +101,7 @@ These do not match the grep but still reach `http.DefaultClient` or `http.Defaul
 The repo already has a home-grown HTTP resilience layer. It overlaps with, and in places
 conflicts with, `LAYOUT.md`:
 
-| Concern            | Existing (`transport/`, `policy/`)                                                    | `CLAUDE.md` / `LAYOUT.md` target                                    |
+| Concern            | Existing (`transport/`, `policy/`)                                                    | `docs/CLAUDE.md` / `LAYOUT.md` target                                    |
 |--------------------|----------------------------------------------------------------------------------------|---------------------------------------------------------------------|
 | Package path       | top-level `transport`, `policy`                                                        | `<root>/integration/transport`, `<root>/integration/resilience`     |
 | Middleware type    | `func(transport.RoundTrip) transport.RoundTrip` (`RoundTrip` is a func type)           | `func(http.RoundTripper) http.RoundTripper`                         |

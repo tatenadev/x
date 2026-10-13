@@ -1,16 +1,39 @@
 # CLAUDE.md — Service Integration Layer
 
-Instructions for Claude Code when working on the outbound HTTP integration layer in this repo.
-Read this file first, then `docs/integration/LAYOUT.md` (packages and interfaces) and
-`docs/integration/PLAN.md` (phased build plan with acceptance criteria).
+Instructions for Claude Code when working on the outbound HTTP integration layer (`integration/`)
+in this repo. Read this file first, then:
+
+- `docs/integration/LAYOUT.md`: packages and interfaces.
+- `docs/integration/PLAN.md`: the phased build plan with acceptance criteria.
+- `docs/integration/INVENTORY.md`: the Phase 0 survey of existing HTTP clients.
+- `docs/integration/MIGRATING.md`: the recipe for moving a client onto the layer.
+- `docs/NEXT_STEPS.md`: open work, carried over for later.
 
 ## Context
 
-This is an **existing codebase**. The integration layer is being introduced alongside code that
-already makes HTTP calls. Before writing anything, complete Phase 0 in `PLAN.md` and fill in the
-"Repo facts" section below. Match existing conventions (naming, error style, test layout, lint
-config) wherever they conflict with the defaults in this file, and note the conflict in your
-summary.
+This is an **existing codebase**, and the integration layer was built alongside code that already
+made HTTP calls. Match existing conventions (naming, error style, test layout, lint config)
+wherever they conflict with the defaults in this file, and note the conflict in your summary.
+
+## Status
+
+Phases 0–7 are complete on `main`. Phase 8 is the only phase left; it and the other open items
+are in `docs/NEXT_STEPS.md`.
+
+| Phase | Scope                                                                  | Status  | Commits                  |
+|-------|------------------------------------------------------------------------|---------|--------------------------|
+| 0     | Survey, repo facts, inventory (no Go upgrade needed)                   | ✅ Done | `1aefd9b`, `8e3c268`     |
+| —     | Pre-Phase-1 baseline fix and `go fix`                                  | ✅ Done | `0046cb7`, `99cadb1`     |
+| 1     | Core skeleton: `Client`, `Config`, `Error`, `Chain`, fakes             | ✅ Done | `5ef2f9c`                |
+| 2     | Codecs (JSON v2, XML, form); `GetJSON`, `PostJSON`, `PutJSON`, `Pages` | ✅ Done | `d1b74a9`                |
+| 3     | Auth: static, context, client credentials, `transport.Auth`            | ✅ Done | `0d77cd9`                |
+| 4     | Retry, backoff, request IDs, idempotency keys                          | ✅ Done | `14e8d6e`                |
+| 5     | Circuit breaker, rate limiter                                          | ✅ Done | `e1e0dfa`                |
+| 6     | Logging, metrics, tracing; `otelx` OTel tracer adapter                 | ✅ Done | `b64358e`, `a7a13e4`     |
+| 7     | Migrate `google.Client`; `NewHTTPClient`; `MIGRATING.md`               | ✅ Done | `b239a2a`, `fe510fa`     |
+| 8     | Dynamic config (`WithDynamicConfig`, `ConfigSource`)                   | ⏳ Open | see `docs/NEXT_STEPS.md` |
+
+Each phase passed `go build`, `go vet`, `go fix` (reviewed) and `go test -race -count=1 ./...`.
 
 ## Go version
 
@@ -26,22 +49,30 @@ Fix the code instead and flag the behavior change.
 
 ## Repo facts
 
-Fill these in during Phase 0. Do not guess.
+Filled in during Phase 0 and kept current since. Update them when they change; do not guess.
 
 - Module path: `github.com/tatenadev/x`
 - `go` directive in `go.mod`: `go 1.27` (toolchain `go1.27.0`; no upgrade needed)
 - Package root for this layer: `integration/` (public, `github.com/tatenadev/x/integration`).
-  It is built fresh. The existing top-level `transport/` and `policy/` packages stay as they
-  are and are retired later, after their callers migrate. Do not import them from `integration/`.
-  `integration/transport` shares a name with the old top-level `transport`, so alias one of them
-  in any file that needs both.
-- Existing HTTP clients found: `google/client.go` (`Client`, oauth2 + `transport.Retry`),
-  `browser/browser.go` (`Session`, injected `Doer`), `file/download.go` (`Download`, bare
-  `http.Get`). Shared resilience code: `transport/`, `policy/`. Implicit `http.DefaultClient`
-  in the oauth2 token sources in `google/google.go`. Details in `docs/integration/INVENTORY.md`.
-- Existing logger / metrics / tracing setup: logging is `charm.land/log/v2` (global logger,
-  custom levels in root `log.go`), plus stdlib `log` in `file/`, `fsio/` and `paths/`. No
-  `slog`, no metrics, no tracing, and no correlation IDs on ctx.
+  Subpackages: `transport`, `auth`, `codec`, `resilience`, `integrationtest`, `otelx`. It was
+  built fresh. The old top-level `transport/` and `policy/` packages have **no callers since
+  Phase 7** and are waiting to be retired (see `docs/NEXT_STEPS.md`). Do not import them from
+  `integration/`. `integration/transport` shares a name with the old top-level `transport`, so
+  alias one of them in any file that needs both.
+- HTTP clients:
+  - `google/client.go` (`Client`): **migrated in Phase 7**, built with
+    `integration.NewHTTPClient`.
+  - `browser/browser.go` (`Session`, injected `Doer`): not migrated.
+  - `file/download.go` (`Download`, bare `http.Get`): not migrated.
+
+  The oauth2 token sources in `google/google.go` still use `http.DefaultClient` implicitly.
+  Details are in `docs/integration/INVENTORY.md`.
+- Existing logger / metrics / tracing setup:
+  - **The app:** logging is `charm.land/log/v2` (global logger, custom levels in root `log.go`),
+    plus stdlib `log` in `file/`, `fsio/` and `paths/`.
+  - **The layer:** `log/slog` via `WithLogger` (off unless configured), `MetricsRecorder` via
+    `WithMetrics`, and `Tracer` via `WithTracer`. OTel is available through `otelx`.
+  - **Correlation:** request IDs travel on ctx (`transport.WithRequestID`).
 - Lint/static analysis in use: `go vet` only. No staticcheck or golangci-lint config, no CI
   config in the repo.
 
@@ -72,8 +103,10 @@ Use the standard library. Each third-party import needs a stated reason in the P
 - IDs: the standard `uuid` package for request IDs and idempotency keys. Do not add
   `github.com/google/uuid`. Check `go doc uuid` for the exact API rather than guessing.
 - Metrics: define a `MetricsRecorder` interface; no Prometheus import in core packages.
-- Tracing: define a `Tracer` interface in core. An OpenTelemetry adapter may live in its own
-  subpackage (`.../otelx`) so core stays dependency-free. Ask before adding OTel to `go.mod`.
+- Tracing: define a `Tracer` interface in core. The OpenTelemetry adapter lives in
+  `integration/otelx`, approved in Phase 6, with `go.opentelemetry.io/otel` and `otel/trace` as
+  direct requirements. It is the only layer package allowed to import OTel.
+  `TestCoreImportsStdlibOnly` enforces this. Ask before adding any other OTel module.
 - Backoff, circuit breaker, rate limiter, token refresh dedup: implement in-house.
   `golang.org/x/time/rate` is the one acceptable exception if a token bucket proves
   non-trivial — ask first.
@@ -90,7 +123,7 @@ Go 1.27 allows methods to declare their own type parameters. Put typed request h
 ```go
 func (c *Client) GetJSON[T any](ctx context.Context, path string) (T, error)
 func (c *Client) PostJSON[Req, Resp any](ctx context.Context, path string, body Req) (Resp, error)
-func (c *Client) Pages[T any](ctx context.Context, path string) iter.Seq2[T, error]
+func (c *Client) Pages[T any](ctx context.Context, path string, next PageFunc) iter.Seq2[T, error]
 ```
 
 Constraints to respect: interface methods cannot have type parameters, and a generic method
@@ -147,6 +180,9 @@ non-generic, and mocking happens at the `Doer`/transport level, not by faking `*
 - The transport stack depends on `Doer`; services depend on `*integration.Client` (built with a
   fake base transport in tests) or a small interface the service defines itself. Never on
   `*http.Client`.
+  - **The one exception:** third-party SDKs that require an `*http.Client` and call several hosts
+    (the Google API libraries). Use `integration.NewHTTPClient`. It runs the same chain with no
+    origin guard, so its credentials go to every host.
 - Accept interfaces, return structs. Constructors validate and return `(T, error)`, so a
   misconfigured client fails at startup.
 - Functional options write to an unexported `config`: `type Option func(*config) error`.
@@ -169,12 +205,18 @@ non-generic, and mocking happens at the `Doer`/transport level, not by faking `*
 
 ### Middleware order
 
-Outermost first. Do not change without updating this section.
+Outermost first. Do not change without updating this section. It is assembled in one place,
+`buildChain` in `integration/client.go`, shared by `New` and `NewHTTPClient`.
 
 ```text
-Tracing -> RequestID -> Metrics -> Logging -> Retry -> RateLimit -> CircuitBreaker -> Auth -> http.Transport
+Tracing -> RequestID -> Metrics -> Logging -> [WithMiddleware] -> Retry -> RateLimit -> CircuitBreaker -> Auth -> http.Transport
 ```
 
+- Tracing, Metrics and Logging are present only when a tracer, recorder or logger is configured.
+  RateLimit is present only when a rate is configured. Auth is present only when a token source is
+  configured. RequestID, Retry and CircuitBreaker are always present.
+- Retry reports each attempt to hooks on the request context (`transport.ObserveAttempts`). That
+  is how the outer middleware count attempts and emit per-attempt events.
 - Tracing, RequestID, Metrics and Logging sit outside Retry: one span, one ID, one latency sample
   and one log line per logical call. Attempts appear as span events and debug logs.
 - RequestID sets `X-Request-ID` (stdlib `uuid`) if absent, and sets `Idempotency-Key` for
@@ -190,7 +232,9 @@ Tracing -> RequestID -> Metrics -> Logging -> Retry -> RateLimit -> CircuitBreak
   with an idempotency key.
 - A request with a body is retryable only if `req.GetBody != nil`; rewind via `GetBody`.
 - Retry on network errors, per-attempt timeouts, 429, 502, 503, 504. Not other 4xx; 500 is
-  configurable.
+  configurable (`WithRetryServerErrors`).
+- `MaxAttempts` counts **total** attempts. The attempt timeout covers reading the body and any
+  rate-limit wait. Retry gives up early when the next wait would outlast the context's deadline.
 - Exponential backoff with full jitter, capped. Honour `Retry-After` on 429/503.
 - Stop when the caller's context is done; return the wrapped `context.Cause(ctx)`.
 
@@ -199,19 +243,29 @@ Tracing -> RequestID -> Metrics -> Logging -> Retry -> RateLimit -> CircuitBreak
 - Domain code never sets `Authorization`. Only `AuthTransport` does, from a `TokenSource`.
 - The managed token source dedupes concurrent refreshes (one in flight; others wait) and
   refreshes before expiry with a skew (default 30s). Mutex plus shared result; no `singleflight`.
-- On a 401, invalidate the cached token once and let Retry try again.
+- On a 401, invalidate the cached token once and let Retry try again. The token is invalidated
+  only if the rejected one is still current. The 401 is retried only when the source implements
+  `auth.Invalidator`; otherwise a retry would resend the same token.
+- Token-source failures are wrapped in `auth.ErrTokenUnavailable`, so they don't count against the
+  upstream's circuit breaker.
 
 ### Logging and secrets
 
 - `slog` with `*Context` methods so trace/request IDs on ctx are emitted.
 - Never log `Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, or token fields. Redact by
   default.
-- Body logging is off by default; when on, cap at 4 KiB and only for text content types.
+- Body logging is off by default; when on, cap at 4 KiB and only for text content types. As built,
+  it shows only JSON (sensitive members masked) and form bodies (sensitive fields masked). Other
+  types are noted but not shown.
+- The client does not log unless `WithLogger` is given. The app logs through `charm.land/log`, so
+  defaulting to `slog.Default()` would add a line per call.
 
-### Dynamic config
+### Dynamic config (Phase 8, open)
 
 - `atomic.Pointer[Config]`. Configs are immutable once stored; replace, never mutate.
 - Validate before `Store`; reject invalid updates and keep the old config.
+- Today the transports copy their settings when the chain is built. Phase 8 must switch them to
+  a `func() *Config` getter. Design notes are in `docs/NEXT_STEPS.md`.
 
 ## Testing
 
@@ -220,6 +274,13 @@ Tracing -> RequestID -> Metrics -> Logging -> Retry -> RateLimit -> CircuitBreak
   in-memory network). Fake time advances instantly, so retry/backoff/breaker/token-expiry tests
   use real `time` calls with no injected clock and no real sleeping. Use `synctest.Sleep` to
   advance and settle. Do not add a `Clock` interface to production code.
+- Start test servers with `integrationtest.Server(t, h)`. `srv.URL` is set only by the first
+  `srv.Client()` or `Start` call. Reading `srv.URL` in the same argument list as `srv.Client()`
+  depends on unspecified evaluation order.
+- The `integration` tests' `newClient` helper makes a single attempt by default, so non-retry
+  tests never wait on backoff. Retry behaviour has its own synctest tests.
+- When a test guards an acceptance criterion, check that it fails when the behaviour is broken
+  (a quick mutation), not only that it passes.
 - A `synctest` bubble panics if goroutines are left durably blocked, which doubles as a
   goroutine-leak check. For hangs outside tests, use the `goroutineleak` pprof profile.
 - Every middleware gets a test proving it does not mutate the input request and closes bodies it
@@ -233,11 +294,13 @@ Tracing -> RequestID -> Metrics -> Logging -> Retry -> RateLimit -> CircuitBreak
 
 - One phase of `PLAN.md` at a time. End each phase with: what changed, commands run and results,
   anything deferred.
-- Do not migrate existing callers until Phase 7. Until then, new code must not change existing
-  behavior.
+- Migrating existing callers is allowed since Phase 7. Follow `docs/integration/MIGRATING.md`
+  and list every behaviour change in the commit or PR.
 - If a rule here conflicts with existing repo code, follow the repo for that file and flag it.
 
 ## Pre-commit checklist
+
+Check this for every commit. It applies to each change, so it is not a progress tracker.
 
 - [ ] `go.mod` declares `go 1.27`+; no JSON/GODEBUG opt-outs added
 - [ ] Requests built with `NewRequestWithContext`; ctx is first param

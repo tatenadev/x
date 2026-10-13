@@ -1,7 +1,7 @@
 # Integration Layer — Build Plan
 
 Phased plan for Claude Code, targeting Go 1.27+. Do one phase per session or PR. A phase is done
-only when every acceptance criterion holds and the commands in `CLAUDE.md` pass.
+only when every acceptance criterion holds and the commands in `docs/CLAUDE.md` pass.
 
 ## Phase 0 — Survey and toolchain upgrade
 
@@ -9,7 +9,7 @@ Mostly read-only. The only code change allowed is the Go version bump below.
 
 Deliverables:
 
-- Fill in "Repo facts" in `CLAUDE.md`.
+- Fill in "Repo facts" in `docs/CLAUDE.md`.
 - List every place that constructs `http.Client`, uses `http.DefaultClient`, `http.Get/Post`,
   or `http.NewRequest` without context. Write it to `docs/integration/INVENTORY.md` with file,
   function, and a one-line note on auth/retry behavior.
@@ -86,7 +86,7 @@ Deliverables: `resilience/backoff.go`, `transport/retry.go`, `transport/requesti
 
 Acceptance:
 
-- Retries only the methods and statuses listed in `CLAUDE.md`; table test covers each.
+- Retries only the methods and statuses listed in `docs/CLAUDE.md`; table test covers each.
 - Body is replayed via `GetBody`; a request with a body and no `GetBody` is not retried.
 - Per-attempt timeout uses `context.WithTimeoutCause(..., ErrAttemptTimeout)` and is retried;
   caller cancellation is not, and the returned error wraps `context.Cause(ctx)`.
@@ -119,7 +119,7 @@ Acceptance:
 
 - One log line per logical call at Info (Warn on error) with service, method, route, status,
   attempts, duration, request ID; per-attempt detail at Debug.
-- Redaction test: none of the sensitive headers in `CLAUDE.md` appear in log output, and URLs
+- Redaction test: none of the sensitive headers in `docs/CLAUDE.md` appear in log output, and URLs
   in logs come from a redacted `URL.Clone()`.
 - Metrics use templated route, never raw URL.
 - `Tracer.Inject` is called on the outgoing request; finish func receives final resp/err.

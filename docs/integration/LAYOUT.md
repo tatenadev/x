@@ -1,7 +1,7 @@
 # Integration Layer — Package Layout and Interfaces
 
 Target package structure and core APIs for Claude Code to implement, written for Go 1.27+. Paths
-are relative to the package root recorded in `CLAUDE.md` ("Repo facts"); adjust to the repo's
+are relative to the package root recorded in `docs/CLAUDE.md` ("Repo facts"); adjust to the repo's
 conventions.
 
 ## Packages
@@ -166,7 +166,7 @@ type Error struct {
     Err        error
 }
 
-// Pointer receivers only (see CLAUDE.md, Errors).
+// Pointer receivers only (see docs/CLAUDE.md, Errors).
 func (e *Error) Error() string
 func (e *Error) Unwrap() error
 
@@ -248,7 +248,7 @@ func WithRoute(ctx context.Context, route string) context.Context
 
 `New` must: parse and validate `baseURL`, apply options, validate the final config, build a fresh
 `*http.Transport` (set `Protocols` / `HTTP2Config` explicitly), assemble the chain in the order
-defined in `CLAUDE.md`, and wrap it in an `*http.Client` with `Timeout` set.
+defined in `docs/CLAUDE.md`, and wrap it in an `*http.Client` with `Timeout` set.
 
 ## Generic helper methods
 
