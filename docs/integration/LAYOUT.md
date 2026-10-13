@@ -169,6 +169,9 @@ func IsRetryable(err error) bool {
 }
 ```
 
+The resilience sentinels (`ErrCircuitOpen`, `ErrRateLimited`, `ErrAttemptTimeout`) are defined in
+`resilience` and re-exported here, because `transport` needs them and cannot import `integration`.
+
 Per-attempt timeouts use `context.WithTimeoutCause(ctx, d, ErrAttemptTimeout)`. Retry checks
 `context.Cause` to tell an attempt timeout (retryable) from caller cancellation (terminal).
 
@@ -199,6 +202,8 @@ func WithTimeout(d time.Duration) Option
 func WithAttemptTimeout(d time.Duration) Option // default 10s, lowered to Timeout if shorter
 func WithRetry(maxAttempts int, base, max time.Duration) Option
 func WithRetryPolicy(p transport.RetryPolicy) Option
+func WithRetryServerErrors() Option                   // also retry a plain 500
+func WithIdempotencyKeys() Option                     // Idempotency-Key on every POST/PATCH
 func WithRand(r *rand.Rand) Option // math/rand/v2; deterministic jitter in tests
 func WithTokenSource(ts auth.TokenSource) Option
 func WithLogger(l *slog.Logger) Option
@@ -216,6 +221,9 @@ type Client struct {
 }
 
 func New(service, baseURL string, opts ...Option) (*Client, error)
+
+// Idempotent opts one POST/PATCH call into an Idempotency-Key (and retries).
+func Idempotent(ctx context.Context) context.Context
 ```
 
 `New` must: parse and validate `baseURL`, apply options, validate the final config, build a fresh
@@ -291,14 +299,13 @@ func (b *BillingClient) Invoices(ctx context.Context) iter.Seq2[Invoice, error] 
 func TestRetryBackoff(t *testing.T) {
     synctest.Test(t, func(t *testing.T) {
         var calls atomic.Int32
-        srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        srv := integrationtest.Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             if calls.Add(1) < 3 {
                 w.WriteHeader(http.StatusServiceUnavailable)
                 return
             }
             w.WriteHeader(http.StatusOK)
         }))
-        defer srv.Close()
 
         c, err := integration.New("test", srv.URL,
             integration.WithBaseTransport(srv.Client().Transport),
@@ -320,5 +327,7 @@ func TestRetryBackoff(t *testing.T) {
 }
 ```
 
-`httptest.NewTestServer(t testing.TB, handler http.Handler)` was verified against go1.27.0
-with `go doc net/http/httptest.NewTestServer`.
+`integrationtest.Server` wraps `httptest.NewTestServer(t testing.TB, handler http.Handler)`
+(verified against go1.27.0). It calls `srv.Client()` before returning, because `srv.URL` is only
+set by the first `Client`/`Start` call; reading `srv.URL` and calling `srv.Client()` in the same
+argument list relies on unspecified evaluation order.

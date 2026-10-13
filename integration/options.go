@@ -6,6 +6,7 @@ package integration
 import (
 	"encoding/json/v2"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -21,6 +22,10 @@ type config struct {
 	middleware []transport.Middleware
 	jsonOpts   []json.Options
 	tokens     auth.TokenSource
+	rand       *rand.Rand
+	policy     transport.RetryPolicy
+	retry500   bool
+	idemAll    bool
 
 	// attemptTimeoutSet records an explicit WithAttemptTimeout. Without
 	// one, New lowers the default attempt timeout to fit Timeout.
@@ -69,6 +74,50 @@ func WithTokenSource(ts auth.TokenSource) Option {
 			return fmt.Errorf("%w: token source is nil", ErrInvalidConfig)
 		}
 		c.tokens = ts
+		return nil
+	}
+}
+
+// WithRand supplies the randomness for backoff jitter. Pass a seeded
+// source for deterministic delays in tests. The default is the global
+// source.
+func WithRand(r *rand.Rand) Option {
+	return func(c *config) error {
+		if r == nil {
+			return fmt.Errorf("%w: rand is nil", ErrInvalidConfig)
+		}
+		c.rand = r
+		return nil
+	}
+}
+
+// WithRetryPolicy replaces the default retry policy. The attempt limit,
+// body replay rules and caller cancellation still apply.
+func WithRetryPolicy(p transport.RetryPolicy) Option {
+	return func(c *config) error {
+		if p == nil {
+			return fmt.Errorf("%w: retry policy is nil", ErrInvalidConfig)
+		}
+		c.policy = p
+		return nil
+	}
+}
+
+// WithRetryServerErrors makes the default policy retry a plain 500 too,
+// for upstreams that use it for transient failures.
+func WithRetryServerErrors() Option {
+	return func(c *config) error {
+		c.retry500 = true
+		return nil
+	}
+}
+
+// WithIdempotencyKeys gives every POST and PATCH an Idempotency-Key, which
+// also makes them retryable. Use it only for upstreams that honour the
+// header. To opt in a single call, use [Idempotent] on its context.
+func WithIdempotencyKeys() Option {
+	return func(c *config) error {
+		c.idemAll = true
 		return nil
 	}
 }

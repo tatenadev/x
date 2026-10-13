@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/tatenadev/x/integration"
@@ -47,12 +46,11 @@ func TestWithTokenSource_Nil(t *testing.T) {
 }
 
 func TestClientCredentials_EndToEnd(t *testing.T) {
-	idp := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	idp := integrationtest.Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"access_token":"from-idp","token_type":"Bearer","expires_in":3600}`)
 	}))
-	defer idp.Close()
-	api := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := integrationtest.Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer from-idp" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -60,7 +58,6 @@ func TestClientCredentials_EndToEnd(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"id":"inv-1","amount":3}`)
 	}))
-	defer api.Close()
 
 	cc, err := auth.NewClientCredentials(idp.URL+"/token", "id", "secret", auth.WithDoer(idp.Client()))
 	if err != nil {

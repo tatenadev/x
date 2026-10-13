@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/tatenadev/x/integration/auth"
+	"github.com/tatenadev/x/integration/integrationtest"
 )
 
 // idp is a fake token endpoint. It issues "tok-N" for the Nth request.
@@ -66,8 +66,7 @@ func (p *idp) form() (url.Values, string) {
 
 func newCC(t *testing.T, p *idp, opts ...auth.CredentialsOption) *auth.ClientCredentials {
 	t.Helper()
-	srv := httptest.NewTestServer(t, p)
-	t.Cleanup(srv.Close)
+	srv := integrationtest.Server(t, p)
 	cc, err := auth.NewClientCredentials(srv.URL+"/token", "my client", "s3cret&",
 		append([]auth.CredentialsOption{auth.WithDoer(srv.Client())}, opts...)...)
 	if err != nil {
@@ -319,10 +318,9 @@ func TestClientCredentials_BadResponses(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := integrationtest.Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				io.WriteString(w, tt.body)
 			}))
-			defer srv.Close()
 			cc, err := auth.NewClientCredentials(srv.URL, "id", "secret", auth.WithDoer(srv.Client()))
 			if err != nil {
 				t.Fatal(err)

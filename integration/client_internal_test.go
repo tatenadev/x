@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestNew_DefaultsAndTransport(t *testing.T) {
+func TestNew_Defaults(t *testing.T) {
 	c, err := New("billing", "https://api.test/v1")
 	if err != nil {
 		t.Fatal(err)
@@ -33,10 +33,10 @@ func TestNew_DefaultsAndTransport(t *testing.T) {
 	if hc.Timeout != DefaultTimeout {
 		t.Errorf("http.Client.Timeout = %v, want %v", hc.Timeout, DefaultTimeout)
 	}
-	ht, ok := hc.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("transport = %T, want *http.Transport", hc.Transport)
-	}
+}
+
+func TestNewHTTPTransport(t *testing.T) {
+	ht := newHTTPTransport()
 	if ht == http.DefaultTransport {
 		t.Error("client shares http.DefaultTransport")
 	}

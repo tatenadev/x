@@ -11,26 +11,25 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
+	"uuid"
 
 	"github.com/tatenadev/x/integration/codec"
+	"github.com/tatenadev/x/integration/resilience"
 	"github.com/tatenadev/x/integration/transport"
 )
-
-// headerRequestID carries the per-call correlation ID.
-const headerRequestID = "X-Request-ID"
 
 // maxRedirects matches net/http's default redirect limit.
 const maxRedirects = 10
 
 // Client calls one upstream service. It is safe for concurrent use.
 type Client struct {
-	cfg  atomic.Pointer[Config]
-	doer Doer
-	json codec.JSON
+	cfg      atomic.Pointer[Config]
+	doer     Doer
+	json     codec.JSON
+	retry500 bool
 }
 
 // New builds a Client for service at baseURL. It applies defaults, then
@@ -59,7 +58,7 @@ func New(service, baseURL string, opts ...Option) (*Client, error) {
 		cfg.base = newHTTPTransport()
 	}
 
-	c := &Client{json: codec.NewJSON(cfg.jsonOpts...)}
+	c := &Client{json: codec.NewJSON(cfg.jsonOpts...), retry500: cfg.retry500}
 	c.cfg.Store(new(cfg.Config.clone()))
 	c.doer = &http.Client{
 		Transport:     buildChain(&cfg),
@@ -74,15 +73,39 @@ func New(service, baseURL string, opts ...Option) (*Client, error) {
 //	Tracing -> RequestID -> Metrics -> Logging -> caller middleware
 //	  -> Retry -> RateLimit -> CircuitBreaker -> Auth -> base
 //
-// Tracing, RequestID, Metrics, Logging, Retry, RateLimit and
-// CircuitBreaker arrive in later phases at the positions above.
+// Tracing, Metrics, Logging, RateLimit and CircuitBreaker arrive in later
+// phases at the positions above.
 func buildChain(cfg *config) http.RoundTripper {
-	mws := slices.Clone(cfg.middleware)
+	var ridOpts []transport.RequestIDOption
+	if cfg.idemAll {
+		ridOpts = append(ridOpts, transport.IdempotencyKeys())
+	}
+	policy := cfg.policy
+	if policy == nil {
+		policy = transport.DefaultPolicy{
+			Backoff:          resilience.NewBackoff(cfg.BackoffBase, cfg.BackoffMax, cfg.rand),
+			RetryServerError: cfg.retry500,
+		}
+	}
+
+	mws := []transport.Middleware{transport.RequestID(ridOpts...)}
+	mws = append(mws, cfg.middleware...)
+	mws = append(mws, transport.Retry(transport.RetryConfig{
+		Policy:            policy,
+		MaxAttempts:       cfg.MaxAttempts,
+		AttemptTimeout:    cfg.AttemptTimeout,
+		RetryUnauthorized: cfg.tokens != nil,
+	}))
 	if cfg.tokens != nil {
 		mws = append(mws, transport.Auth(cfg.tokens))
 	}
 	return transport.Chain(cfg.base, mws...)
 }
+
+// Idempotent returns a copy of ctx that opts a POST or PATCH made with it
+// into an Idempotency-Key, which also makes it retryable. The key is the
+// same on every attempt.
+func Idempotent(ctx context.Context) context.Context { return transport.Idempotent(ctx) }
 
 // newHTTPTransport returns a transport owned by one Client, never shared
 // through http.DefaultTransport.
@@ -132,13 +155,24 @@ func (c *Client) Do(ctx context.Context, req *http.Request) (*http.Response, err
 			cfg.Service, redactURL(req.URL), redactURL(cfg.BaseURL))
 	}
 
+	// Fix the request ID here, on the context, so errors can report it even
+	// when no response arrives. The RequestID middleware sends it.
+	id := req.Header.Get(transport.HeaderRequestID)
+	if id == "" {
+		var ok bool
+		if id, ok = transport.RequestIDFromContext(ctx); !ok {
+			id = uuid.New().String()
+			ctx = transport.WithRequestID(ctx, id)
+		}
+	}
+
 	req = req.WithContext(ctx)
 	resp, err := c.doer.Do(req)
 	if err != nil {
-		return nil, transportError(ctx, cfg, req, err)
+		return nil, transportError(ctx, cfg, req, id, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, statusError(cfg, req, resp)
+		return nil, statusError(cfg, req, resp, c.retry500)
 	}
 	return resp, nil
 }
@@ -219,7 +253,7 @@ func effectivePort(u *url.URL) string {
 
 // transportError wraps an error from the Doer. Caller cancellation is
 // reported as context.Cause(ctx) and is not retryable.
-func transportError(ctx context.Context, cfg *Config, req *http.Request, err error) *Error {
+func transportError(ctx context.Context, cfg *Config, req *http.Request, requestID string, err error) *Error {
 	// *url.Error repeats the unredacted URL; Error.URL carries a safe copy.
 	err = unwrapURLError(err)
 	retryable := !errors.Is(err, ErrCircuitOpen)
@@ -232,19 +266,19 @@ func transportError(ctx context.Context, cfg *Config, req *http.Request, err err
 		Method:    req.Method,
 		URL:       redactURL(req.URL),
 		Retryable: retryable,
-		RequestID: req.Header.Get(headerRequestID),
+		RequestID: requestID,
 		Err:       err,
 	}
 }
 
 // statusError turns a non-2xx response into an *Error, keeping at most
 // maxErrorBody bytes of its body, and closes the body.
-func statusError(cfg *Config, req *http.Request, resp *http.Response) *Error {
+func statusError(cfg *Config, req *http.Request, resp *http.Response, retry500 bool) *Error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody)) // diagnostics only
 	resp.Body.Close()
 
 	e := responseError(cfg, req, resp)
-	e.Retryable = retryableStatus(resp.StatusCode)
+	e.Retryable = retryableStatus(resp.StatusCode, retry500)
 	e.Body = body
 	return e
 }
@@ -266,12 +300,16 @@ func responseError(cfg *Config, req *http.Request, resp *http.Response) *Error {
 	if resp.Request != nil {
 		sent = resp.Request
 	}
+	id := sent.Header.Get(transport.HeaderRequestID)
+	if id == "" {
+		id, _ = transport.RequestIDFromContext(req.Context())
+	}
 	return &Error{
 		Service:    cfg.Service,
 		Method:     req.Method,
 		URL:        redactURL(sent.URL),
 		StatusCode: resp.StatusCode,
-		RequestID:  sent.Header.Get(headerRequestID),
+		RequestID:  id,
 	}
 }
 

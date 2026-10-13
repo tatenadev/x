@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/tatenadev/x/integration"
@@ -201,7 +200,7 @@ func TestGetJSON_Errors(t *testing.T) {
 }
 
 func TestPostJSON_TestServer(t *testing.T) {
-	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := integrationtest.Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		if r.Header.Get("Content-Type") != "application/json" || string(b) != `{"id":"in","amount":9}` {
 			http.Error(w, "unexpected request", http.StatusBadRequest)
@@ -210,7 +209,6 @@ func TestPostJSON_TestServer(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"id":"srv","amount":9}`)
 	}))
-	defer srv.Close()
 
 	c := newClient(t, srv.URL, srv.Client().Transport)
 	got, err := c.PostJSON[invoice, invoice](t.Context(), "/invoices", invoice{ID: "in", Amount: 9})

@@ -8,20 +8,23 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/tatenadev/x/integration/resilience"
 )
 
-// Sentinel errors. Match them with [errors.Is].
+// Sentinel errors. Match them with [errors.Is]. The resilience ones are
+// shared with the transports, which cannot import this package.
 var (
 	// ErrCircuitOpen is returned while the circuit breaker rejects calls.
 	// It is terminal: retrying inside the same call cannot succeed.
-	ErrCircuitOpen = errors.New("integration: circuit open")
+	ErrCircuitOpen = resilience.ErrCircuitOpen
 	// ErrRateLimited is returned when the local rate limiter refuses a call.
-	ErrRateLimited = errors.New("integration: rate limited")
-	// ErrInvalidConfig wraps every [Config] validation failure.
-	ErrInvalidConfig = errors.New("integration: invalid config")
+	ErrRateLimited = resilience.ErrRateLimited
 	// ErrAttemptTimeout is the context cause of a per-attempt timeout. It
 	// distinguishes a retryable attempt timeout from caller cancellation.
-	ErrAttemptTimeout = errors.New("integration: attempt timed out")
+	ErrAttemptTimeout = resilience.ErrAttemptTimeout
+	// ErrInvalidConfig wraps every [Config] validation failure.
+	ErrInvalidConfig = errors.New("integration: invalid config")
 )
 
 // maxErrorBody caps how much of a non-2xx response body is kept in
@@ -83,14 +86,16 @@ func IsRetryable(err error) bool {
 }
 
 // retryableStatus reports whether a response status is worth retrying:
-// 429 and the gateway-class 5xx. A plain 500 is not, by default.
-func retryableStatus(code int) bool {
+// 429 and the gateway-class 5xx, plus a plain 500 when retry500 is set.
+func retryableStatus(code int, retry500 bool) bool {
 	switch code {
 	case http.StatusTooManyRequests,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
 		http.StatusGatewayTimeout:
 		return true
+	case http.StatusInternalServerError:
+		return retry500
 	}
 	return false
 }

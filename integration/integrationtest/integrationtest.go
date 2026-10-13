@@ -10,10 +10,12 @@ package integrationtest
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"testing"
 )
 
 // RespondFunc produces the response for one request.
@@ -110,4 +112,40 @@ func Response(status int, body string) *http.Response {
 		Body:          NewBody(body),
 		ContentLength: int64(len(body)),
 	}
+}
+
+// Script returns a RespondFunc that answers the nth request with steps[n].
+// Once the steps run out, the last one repeats. It is safe for concurrent
+// use.
+func Script(steps ...RespondFunc) RespondFunc {
+	var n atomic.Int64
+	return func(req *http.Request) (*http.Response, error) {
+		i := min(int(n.Add(1))-1, len(steps)-1)
+		return steps[i](req)
+	}
+}
+
+// Status returns a RespondFunc answering with the given status and body.
+func Status(code int, body string) RespondFunc {
+	return func(*http.Request) (*http.Response, error) {
+		return Response(code, body), nil
+	}
+}
+
+// Fail returns a RespondFunc failing with err.
+func Fail(err error) RespondFunc {
+	return func(*http.Request) (*http.Response, error) {
+		return nil, err
+	}
+}
+
+// Server starts an in-memory test server for h (httptest.NewTestServer),
+// so it works inside a synctest bubble, and closes it when t ends. Its
+// URL is set and srv.Client() is ready to use.
+func Server(t testing.TB, h http.Handler) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewTestServer(t, h)
+	srv.Client() // starts the server and sets srv.URL
+	t.Cleanup(srv.Close)
+	return srv
 }

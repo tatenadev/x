@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -19,9 +18,15 @@ import (
 	"github.com/tatenadev/x/integration/transport"
 )
 
+// newClient builds a client over rt. It makes a single attempt unless opts
+// say otherwise, so tests of non-retry behavior never wait on backoff.
 func newClient(t *testing.T, baseURL string, rt http.RoundTripper, opts ...integration.Option) *integration.Client {
 	t.Helper()
-	c, err := integration.New("billing", baseURL, append([]integration.Option{integration.WithBaseTransport(rt)}, opts...)...)
+	base := []integration.Option{
+		integration.WithBaseTransport(rt),
+		integration.WithRetry(1, time.Millisecond, time.Millisecond),
+	}
+	c, err := integration.New("billing", baseURL, append(base, opts...)...)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -408,11 +413,10 @@ func TestDo_Redirects(t *testing.T) {
 
 func TestClient_TestServer(t *testing.T) {
 	var got string
-	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := integrationtest.Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = r.Method + " " + r.URL.RequestURI()
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	defer srv.Close()
 
 	c := newClient(t, srv.URL+"/v1", srv.Client().Transport)
 	if err := c.Delete(t.Context(), "/invoices/42"); err != nil {
@@ -425,10 +429,9 @@ func TestClient_TestServer(t *testing.T) {
 
 func TestClient_Timeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		srv := integrationtest.Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			<-r.Context().Done() // hang until the client gives up
 		}))
-		defer srv.Close()
 
 		const timeout = 2 * time.Second
 		c := newClient(t, srv.URL, srv.Client().Transport, integration.WithTimeout(timeout))
