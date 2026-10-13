@@ -157,11 +157,11 @@ func TestNew_InvalidObservabilityOptions(t *testing.T) {
 
 // TestCoreImportsStdlibOnly pins the dependency policy: every non-test file
 // under integration/ imports only the standard library and the layer's own
-// packages. An adapter needing a third-party module (otelx) would be the
-// one allowed exception and must be listed here.
+// packages. The OpenTelemetry adapter is the one listed exception, and it
+// may import only OpenTelemetry.
 func TestCoreImportsStdlibOnly(t *testing.T) {
 	const self = "github.com/tatenadev/x/integration"
-	allowed := map[string]bool{} // package dir -> may import third-party
+	allowed := map[string]string{"otelx": "go.opentelemetry.io/otel"} // package dir -> allowed module prefix
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -174,7 +174,8 @@ func TestCoreImportsStdlibOnly(t *testing.T) {
 		for _, imp := range f.Imports {
 			p, _ := strconv.Unquote(imp.Path.Value)
 			first, _, _ := strings.Cut(p, "/")
-			if strings.Contains(first, ".") && !strings.HasPrefix(p, self) && !allowed[filepath.Dir(path)] {
+			prefix, ok := allowed[filepath.Dir(path)]
+			if strings.Contains(first, ".") && !strings.HasPrefix(p, self) && !(ok && strings.HasPrefix(p, prefix)) {
 				t.Errorf("%s imports %s", path, p)
 			}
 		}
