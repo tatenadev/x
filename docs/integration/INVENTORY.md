@@ -22,6 +22,10 @@ A wider search (`DefaultTransport`, `oauth2.Transport`, `RoundTrip`, `option.Wit
 
 ### `google.Client`
 
+> **Migrated in Phase 7.** It is now built with `integration.NewHTTPClient` and an `oauth2` token
+> source adapter. The rest of this section describes the client as Phase 0 found it. The old
+> top-level `transport` and `policy` packages no longer have callers. See `MIGRATING.md`.
+
 - **File / func:** `google/client.go` `Client(ctx, xdg, scope...) (*http.Client, error)`
 - **Builds:** `transport.New(WithBaseTransport(oauth2.Transport{Source: ts}.RoundTrip),
   WithMiddleware(transport.Retry(...)))` wrapped in `&http.Client{Transport: ...}`. Until

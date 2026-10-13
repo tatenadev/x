@@ -1,0 +1,11 @@
+{
+  "spreadsheetId": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+  "tableRange": "Sheet1!A1:C3",
+  "updates": {
+    "spreadsheetId": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+    "updatedRange": "Sheet1!A4:C5",
+    "updatedRows": 2,
+    "updatedColumns": 3,
+    "updatedCells": 6
+  }
+}
